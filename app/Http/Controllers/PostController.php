@@ -3,15 +3,37 @@
 namespace App\Http\Controllers;
 
 use App\Models\Post;
-use Illuminate\Http\Request;
-use App\Enums\PaginationOptions;
+use App\Dto\CreatePost;
+use App\Dto\DeletePost;
+use App\Dto\UpdatePost;
+use Illuminate\Support\Facades\Gate;
+use App\Services\Post\CreatePostService;
+use App\Services\Post\DeletePostService;
+use App\Services\Post\UpdatePostService;
+use App\Interfaces\PostRepositoryInterface;
 use App\Http\Requests\Post\StorePostRequest;
 use App\Http\Requests\Post\UpdatePostRequest;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Gate;
 
 class PostController extends Controller
 {
+
+    private PostRepositoryInterface $postRepository;
+    private CreatePostService $createPostService;
+    private UpdatePostService $updatePostService;
+    private DeletePostService $deletePostService;
+
+    public function __construct(
+        CreatePostService $createPostService,
+        UpdatePostService $updatePostService,
+        DeletePostService $deletePostService,
+        PostRepositoryInterface $postRepository
+        )
+    {
+        $this->createPostService = $createPostService;
+        $this->updatePostService = $updatePostService;
+        $this->deletePostService = $deletePostService;
+        $this->postRepository = $postRepository;
+    }
     /**
      * Display a listing of the resource.
      *
@@ -19,9 +41,7 @@ class PostController extends Controller
      */
     public function index()
     {
-        $posts = Post::with('user')
-                     ->orderBy('id', 'desc')             
-                     ->paginate(PaginationOptions::DEFAULT_PER_PAGE);
+        $posts = $this->postRepository->getAllPostsPaginated();
 
         return view('posts.index',compact('posts'));
     }
@@ -45,9 +65,8 @@ class PostController extends Controller
      */
     public function store(StorePostRequest $request)
     {
-        $post = new Post($request->validated());
-        $post->created_by = Auth::id();
-        $post->save();
+        $createPost = CreatePost::fromRequest($request);
+        $this->createPostService->handle($createPost);
         return redirect()->route('posts.index')->with('success',__('posts.created_successfully'));
     }
 
@@ -59,6 +78,7 @@ class PostController extends Controller
      */
     public function edit(Post $post)
     {
+        $post = $this->postRepository->getPostById($post->id);
         return view('posts.edit',compact('post'));
     }
 
@@ -76,7 +96,9 @@ class PostController extends Controller
             return redirect()->back()->with('error',__('posts.unauthorized_to_delete'));
         }
 
-        $post->update($request->validated());
+        $updatePost = UpdatePost::fromRequest($request, $post->id);
+        $post = $this->updatePostService->handle($updatePost);
+
         return redirect()->route('posts.index')->with('success',__('posts.updated_successfully'));
     }
 
@@ -94,7 +116,8 @@ class PostController extends Controller
         }
 
         try {
-        $post->delete();
+            $deletePost = DeletePost::make($post->id);
+            $this->deletePostService->handle($deletePost);
         } catch(\Exception $e) {
             return redirect()->back()->with('error', __('posts.record_not_found'));
         }
